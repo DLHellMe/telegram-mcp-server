@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "telegram-scraper": {
+      "command": "node",
+      "args": ["/absolute/path/to/telegram-mcp-server/dist/index.js"],
+      "env": {
+        "BROWSER_HEADLESS": "true",
+        "LOG_LEVEL": "INFO",
+        "TELEGRAM_API_ID": "your_api_id_here",
+        "TELEGRAM_API_HASH": "your_api_hash_here"
+      }
+    }
+  }
+}

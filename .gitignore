@@ -1,0 +1,65 @@
+# Node modules
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# API credentials and sensitive data
+*.session
+*session.txt
+*cookies.json
+*auth_data.json
+telegram_session.txt
+telegram_cookies.json
+telegram_auth_data.json
+
+# Scraped data
+scraped_data/
+screenshots/
+*.png
+*.jpg
+*.jpeg
+
+# User-specific paths
+/mnt/c/Users/*/
+**/AppData/Roaming/Claude/telegram_scraped_data/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/
+*.log
+
+# Test files
+test-*.js
+!test-api.js
+!test-server.js
+!test-scrape.js
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Personal configuration files
+claude_desktop_config.json
+QUICK_START_API.md

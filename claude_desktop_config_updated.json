@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "@modelcontextprotocol/server-filesystem",
+        "C:\\Users\\User\\AppData\\Roaming\\Claude",
+        "C:\\Users\\User\\AppData\\Roaming\\Claude\\telegram_scraped_data",
+        "C:\\Users\\User\\Desktop"
+      ]
+    },
+    "telegram-scraper": {
+      "command": "node",
+      "args": ["C:\\vibe_m\\tgmcp\\dist\\index.js"],
+      "env": {
+        "BROWSER_HEADLESS": "false",
+        "LOG_LEVEL": "DEBUG",
+        "CHROME_EXECUTABLE_PATH": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        "SCROLL_DELAY": "2000",
+        "MAX_SCROLL_ATTEMPTS": "500"
+      }
+    }
+  }
+}

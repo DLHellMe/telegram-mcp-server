@@ -1,0 +1,380 @@
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  Tool
+} from '@modelcontextprotocol/sdk/types.js';
+import { TelegramScraper } from './scraper/telegram-scraper.js';
+import { MarkdownFormatter } from './formatters/markdown-formatter.js';
+import { ScrapeOptions } from './types/telegram.types.js';
+import { logger, LogLevel } from './utils/logger.js';
+import { config } from './utils/config.js';
+import { parseISO } from 'date-fns';
+import { TelegramAuth } from './auth/telegram-auth.js';
+
+export class TelegramMCPServer {
+  private server: Server;
+  private scraper: TelegramScraper;
+  private authScraper: TelegramScraper;
+  private formatter: MarkdownFormatter;
+  private auth: TelegramAuth;
+
+  constructor() {
+    this.server = new Server(
+      {
+        name: config.server.name,
+        version: config.server.version
+      },
+      {
+        capabilities: {
+          tools: {}
+        }
+      }
+    );
+
+    this.scraper = new TelegramScraper(false); // Unauthenticated scraper
+    this.authScraper = new TelegramScraper(true); // Authenticated scraper
+    this.formatter = new MarkdownFormatter();
+    this.auth = new TelegramAuth();
+
+    this.setupHandlers();
+    this.setupLogLevel();
+  }
+
+  private setupLogLevel(): void {
+    const level = config.debug.logLevel.toUpperCase();
+    if (level in LogLevel) {
+      logger.setLevel(LogLevel[level as keyof typeof LogLevel]);
+    }
+  }
+
+  private setupHandlers(): void {
+    // Handle tool listing
+    this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
+      tools: this.getTools()
+    }));
+
+    // Handle tool calls
+    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      const { name, arguments: args } = request.params;
+
+      try {
+        switch (name) {
+          case 'scrape_channel':
+            return await this.handleScrapeChannel(args);
+          
+          case 'scrape_channel_full':
+            return await this.handleScrapeChannelFull(args);
+          
+          case 'scrape_group':
+            return await this.handleScrapeGroup(args);
+          
+          case 'get_channel_info':
+            return await this.handleGetChannelInfo(args);
+          
+          case 'scrape_date_range':
+            return await this.handleScrapeDateRange(args);
+          
+          case 'telegram_login':
+            return await this.handleTelegramLogin(args);
+          
+          case 'telegram_logout':
+            return await this.handleTelegramLogout();
+          
+          case 'telegram_auth_status':
+            return await this.handleAuthStatus();
+          
+          case 'scrape_channel_authenticated':
+            return await this.handleScrapeChannelAuthenticated(args);
+          
+          default:
+            throw new Error(`Unknown tool: ${name}`);
+        }
+      } catch (error) {
+        logger.error(`Tool execution failed: ${name}`, error);
+        throw error;
+      }
+    });
+  }
+
+  private getTools(): Tool[] {
+    return [
+      {
+        name: 'scrape_channel',
+        description: 'Scrape a public Telegram channel and return posts in markdown format',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            url: {
+              type: 'string',
+              description: 'The Telegram channel URL (e.g., https://t.me/channelname)'
+            },
+            max_posts: {
+              type: 'number',
+              description: 'Maximum number of posts to scrape (default: 100)',
+              default: 100
+            },
+            include_reactions: {
+              type: 'boolean',
+              description: 'Include reaction data in the output',
+              default: true
+            }
+          },
+          required: ['url']
+        }
+      },
+      {
+        name: 'scrape_channel_full',
+        description: 'Scrape ALL posts from a Telegram channel and save to file. Returns file location.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            url: {
+              type: 'string',
+              description: 'The Telegram channel URL (e.g., https://t.me/channelname)'
+            },
+            save_to_file: {
+              type: 'boolean',
+              description: 'Save results to MD and JSON files',
+              default: true
+            }
+          },
+          required: ['url']
+        }
+      },
+      {
+        name: 'scrape_group',
+        description: 'Scrape a public Telegram group and return posts in markdown format',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            url: {
+              type: 'string',
+              description: 'The Telegram group URL (e.g., https://t.me/groupname)'
+            },
+            max_posts: {
+              type: 'number',
+              description: 'Maximum number of posts to scrape (default: 100)',
+              default: 100
+            }
+          },
+          required: ['url']
+        }
+      },
+      {
+        name: 'get_channel_info',
+        description: 'Get only the channel/group information without scraping posts',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            url: {
+              type: 'string',
+              description: 'The Telegram channel/group URL'
+            }
+          },
+          required: ['url']
+        }
+      },
+      {
+        name: 'scrape_date_range',
+        description: 'Scrape posts within a specific date range',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            url: {
+              type: 'string',
+              description: 'The Telegram channel/group URL'
+            },
+            date_from: {
+              type: 'string',
+              description: 'Start date in ISO format (e.g., 2024-01-01)'
+            },
+            date_to: {
+              type: 'string',
+              description: 'End date in ISO format (e.g., 2024-01-31)'
+            }
+          },
+          required: ['url', 'date_from']
+        }
+      },
+      {
+        name: 'telegram_login',
+        description: 'Authenticate with Telegram Web to access restricted content',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            phone_number: {
+              type: 'string',
+              description: 'Phone number in international format (optional, for automated login)'
+            }
+          },
+          required: []
+        }
+      },
+      {
+        name: 'telegram_logout',
+        description: 'Clear Telegram authentication cookies',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+          required: []
+        }
+      },
+      {
+        name: 'telegram_auth_status',
+        description: 'Check if authenticated with Telegram',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+          required: []
+        }
+      },
+      {
+        name: 'scrape_channel_authenticated',
+        description: 'Scrape a Telegram channel using authenticated session (can access restricted content)',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            url: {
+              type: 'string',
+              description: 'The Telegram channel URL (e.g., https://t.me/channelname)'
+            },
+            max_posts: {
+              type: 'number',
+              description: 'Maximum number of posts to scrape (default: 100)',
+              default: 100
+            }
+          },
+          required: ['url']
+        }
+      }
+    ];
+  }
+
+  private async handleScrapeChannel(args: any): Promise<any> {
+    const options: ScrapeOptions = {
+      url: args.url,
+      maxPosts: args.max_posts === undefined ? 0 : args.max_posts, // 0 means no limit
+      includeReactions: args.include_reactions !== false
+    };
+
+    const result = await this.scraper.scrape(options);
+    const markdown = this.formatter.format(result);
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: markdown
+        }
+      ]
+    };
+  }
+
+  private async handleScrapeGroup(args: any): Promise<any> {
+    // Groups are handled the same way as channels
+    return this.handleScrapeChannel(args);
+  }
+
+  private async handleGetChannelInfo(args: any): Promise<any> {
+    const options: ScrapeOptions = {
+      url: args.url,
+      maxPosts: 0 // Don't scrape posts
+    };
+
+    const result = await this.scraper.scrape(options);
+    
+    const info = `# Channel Information
+
+**Name:** ${result.channel.name}${result.channel.verified ? ' ✓' : ''}
+**Username:** @${result.channel.username}
+${result.channel.description ? `**Description:** ${result.channel.description}` : ''}
+${result.channel.subscriberCount ? `**Subscribers:** ${result.channel.subscriberCount.toLocaleString()}` : ''}
+
+*Scraped at: ${result.scrapedAt.toISOString()}*`;
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: info
+        }
+      ]
+    };
+  }
+
+  private async handleScrapeDateRange(args: any): Promise<any> {
+    const options: ScrapeOptions = {
+      url: args.url,
+      dateFrom: parseISO(args.date_from),
+      dateTo: args.date_to ? parseISO(args.date_to) : new Date(),
+      includeReactions: true
+    };
+
+    const result = await this.scraper.scrape(options);
+    const markdown = this.formatter.format(result);
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: markdown
+        }
+      ]
+    };
+  }
+
+  private async handleScrapeChannelFull(args: any): Promise<any> {
+    const options: ScrapeOptions = {
+      url: args.url,
+      maxPosts: 0, // No limit - get ALL posts
+      includeReactions: true
+    };
+
+    const result = await this.scraper.scrape(options);
+    
+    // The scraper already saves to file, so we just need to inform about it
+    const channelName = result.channel.username;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    const windowsPath = `C:\\Users\\User\\AppData\\Roaming\\Claude\\telegram_scraped_data\\${channelName}_${timestamp}_full.md`;
+    
+    // Also return a sample of the content for immediate analysis
+    const samplePosts = result.posts.slice(0, 5); // First 5 posts as sample
+    const sampleResult = { ...result, posts: samplePosts };
+    const sampleMarkdown = this.formatter.format(sampleResult);
+    
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Successfully scraped ${result.totalPosts} posts from @${channelName}
+
+Files saved to:
+- Markdown: ${windowsPath}
+- JSON: ${windowsPath.replace('.md', '.json')}
+
+Total posts: ${result.totalPosts}
+Date range: ${result.posts.length > 0 ? `${result.posts[result.posts.length - 1]?.date.toISOString().split('T')[0]} to ${result.posts[0]?.date.toISOString().split('T')[0]}` : 'N/A'}
+
+The full channel history has been saved. Here's a sample of the first 5 posts:
+
+${sampleMarkdown}
+
+To analyze all ${result.totalPosts} posts, open the saved markdown file and copy its contents to Claude.`
+        }
+      ]
+    };
+  }
+
+  async run(): Promise<void> {
+    const transport = new StdioServerTransport();
+    await this.server.connect(transport);
+    logger.info('Telegram MCP Server started');
+  }
+
+  async shutdown(): Promise<void> {
+    await this.scraper.close();
+    logger.info('Server shutdown complete');
+  }
+}
