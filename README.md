@@ -33,7 +33,7 @@ A powerful MCP (Model Context Protocol) server that enables Claude to interact w
 
 1. Clone this repository:
 ```bash
-git clone https://github.com/yourusername/telegram-mcp-server.git
+git clone https://github.com/DLHellMe/telegram-mcp-server.git
 cd telegram-mcp-server
 ```
 
